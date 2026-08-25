@@ -1,52 +1,89 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { EventsGateway } from '../events/events.gateway';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventsGateway: EventsGateway,
+  ) {}
 
-  // 1. Create a project assigned to the authenticated user
   async create(createProjectDto: CreateProjectDto, ownerId: string) {
-    return this.prisma.project.create({
+    const newProject = await this.prisma.project.create({
       data: {
         ...createProjectDto,
-        ownerId, // Link DTO data with user ID extracted from JWT
+        ownerId,
+      },
+      include: {
+        tasks: {
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
+
+    this.eventsGateway.notifyChange('projectCreated', newProject);
+
+    return newProject;
   }
 
-  // 2. Retrieve only projects belonging to the user
-  async findAll(ownerId: string) {
-    return this.prisma.project.findMany({
-      where: { ownerId }, // Security filter
-      include: { tasks: true }, // Include associated tasks
-    });
+  async findAll(
+    ownerId: string,
+    page = 1,
+    limit = 4,
+    sortBy = 'createdAt',
+    order: 'asc' | 'desc' = 'desc',
+  ) {
+    const skip = (page - 1) * limit;
+
+    const [projects, total] = await Promise.all([
+      this.prisma.project.findMany({
+        where: { ownerId },
+        skip,
+        take: limit,
+        orderBy: { [sortBy]: order },
+        include: {
+          tasks: {
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      }),
+      this.prisma.project.count({ where: { ownerId } }),
+    ]);
+
+    return {
+      data: projects,
+      hasMore: skip + projects.length < total,
+    };
   }
 
-  // 3. Retrieve a specific project
   async findOne(id: string, ownerId: string) {
     const project = await this.prisma.project.findFirst({
-      where: { id, ownerId }, // Project must exist AND belong to the user
-      include: { tasks: true },
+      where: { id, ownerId },
+      include: {
+        tasks: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
 
     if (!project) {
-      throw new NotFoundException(
-        'Project not found or you do not have permission to view it',
-      );
+      throw new NotFoundException('Project not found');
     }
 
     return project;
   }
 
-  // 4. Delete a project
   async remove(id: string, ownerId: string) {
-    // First verify it exists and belongs to the user
     await this.findOne(id, ownerId);
 
-    return this.prisma.project.delete({
+    const deletedProject = await this.prisma.project.delete({
       where: { id },
     });
+
+    this.eventsGateway.notifyChange('projectDeleted', deletedProject);
+
+    return deletedProject;
   }
 }
