@@ -3,11 +3,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { EventsGateway } from '../events/events.gateway';
+import { ProjectsService } from '../projects/projects.service';
 
 @Injectable()
 export class TasksService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly projectsService: ProjectsService,
     private readonly eventsGateway: EventsGateway, // <--- Inyección del Gateway
   ) {}
 
@@ -53,8 +55,13 @@ export class TasksService {
       data: updateTaskDto,
     });
 
-    // Notificar actualización de estado/título en tiempo real
     this.eventsGateway.notifyChange('taskUpdated', updatedTask);
+
+    const updatedAnalytics = await this.projectsService.getAnalytics(
+      updatedTask.projectId,
+      userId,
+    );
+    this.eventsGateway.notifyChange('analyticsUpdated', updatedAnalytics);
 
     return updatedTask;
   }

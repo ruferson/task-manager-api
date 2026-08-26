@@ -3,10 +3,12 @@ import { TasksService } from './tasks.service';
 import { TasksController } from './tasks.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EventsModule } from '../events/events.module'; // <--- Importar
+import { HttpModule } from '@nestjs/axios';
+import { ProjectsService } from '../projects/projects.service';
 
 @Module({
-  imports: [PrismaModule, EventsModule],
+  imports: [PrismaModule, EventsModule, HttpModule],
   controllers: [TasksController],
-  providers: [TasksService],
+  providers: [TasksService, ProjectsService],
 })
 export class TasksModule {}

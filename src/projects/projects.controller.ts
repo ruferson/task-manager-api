@@ -58,4 +58,12 @@ export class ProjectsController {
   remove(@Param('id') id: string, @CurrentUser() user: UserPayload) {
     return this.projectsService.remove(id, user.userId);
   }
+
+  @Get(':id/analytics')
+  async getAnalytics(
+    @Param('id') id: string,
+    @CurrentUser() user: UserPayload,
+  ) {
+    return this.projectsService.getAnalytics(id, user.userId);
+  }
 }

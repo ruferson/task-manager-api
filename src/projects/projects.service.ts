@@ -1,13 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { EventsGateway } from '../events/events.gateway';
+import { ProjectAnalyticsResponse } from './interfaces/project-analytics-response.interface';
 
 @Injectable()
 export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventsGateway: EventsGateway,
+    private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
   ) {}
 
   async create(createProjectDto: CreateProjectDto, ownerId: string) {
@@ -85,5 +91,58 @@ export class ProjectsService {
     this.eventsGateway.notifyChange('projectDeleted', deletedProject);
 
     return deletedProject;
+  }
+
+  async getAnalytics(
+    id: string,
+    ownerId: string,
+  ): Promise<ProjectAnalyticsResponse> {
+    const project = await this.findOne(id, ownerId);
+
+    const totalTasks = project.tasks.length;
+    const completedTasks = project.tasks.filter(
+      (task) => task.status === 'COMPLETED',
+    ).length;
+
+    const inprogressTasks = project.tasks.filter(
+      (task) => task.status === 'IN_PROGRESS',
+    ).length;
+
+    const analyticsUrl = this.configService.get<string>(
+      'ANALYTICS_SERVICE_URL',
+      'http://analytics:8000',
+    );
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post<ProjectAnalyticsResponse>(
+          `${analyticsUrl}/analytics/project`,
+          {
+            project_id: project.id,
+            title: project.title,
+            total_tasks: totalTasks,
+            completed_tasks: completedTasks,
+            inprogress_tasks: inprogressTasks,
+          },
+        ),
+      );
+
+      return response.data;
+    } catch {
+      return {
+        project_id: project.id,
+        title: project.title,
+        total_tasks: totalTasks,
+        completed_tasks: completedTasks,
+        inprogress_tasks: inprogressTasks,
+        pending_tasks: totalTasks - (completedTasks + inprogressTasks / 2),
+        completion_rate:
+          totalTasks > 0
+            ? ((completedTasks + inprogressTasks / 2) / totalTasks) * 100
+            : 0,
+        status: 'UNAVAILABLE',
+        health: 'UNKNOWN',
+      };
+    }
   }
 }
