@@ -1,35 +1,30 @@
-# 1. Imagen base oficial de Node.js
-FROM node:20-alpine AS builder
-
+# Stage 1: Install all dependencies (including devDependencies)
+FROM node:20-alpine AS deps
 WORKDIR /usr/src/app
-
-# 2. Copiar manifiestos y esquema de Prisma
 COPY package*.json ./
 COPY prisma ./prisma/
+RUN npm ci
 
-# 3. Instalar dependencias completas
-RUN npm install
-
-# 4. Copiar código fuente, generar Prisma Client y compilar NestJS
+# Stage 2: Build source code and generate Prisma Client
+FROM node:20-alpine AS builder
+WORKDIR /usr/src/app
+COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-# 5. Etapa final de producción
-FROM node:20-alpine
-
+# Stage 3: Production runner (Lightweight final image)
+FROM node:20-alpine AS runner
 WORKDIR /usr/src/app
+ENV NODE_ENV=production
 
-# Copiar manifiestos e instalar solo producción
 COPY package*.json ./
-RUN npm install --only=production
+COPY prisma ./prisma/
+RUN npm ci --only=production && npm cache clean --force
 
-# Copiar todo el directorio de distribución compilado y cliente de Prisma
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /usr/src/app/node_modules/@prisma ./node_modules/@prisma
 
 EXPOSE 3001
-
-# Arrancar buscando la ruta estándar compilada de NestJS
-CMD ["sh", "-c", "if [ -f dist/main.js ]; then node dist/main.js; else node dist/src/main.js; fi"]
+CMD ["node", "dist/main.js"]
